@@ -1,111 +1,103 @@
-# RDP Pilot Plugin
+# RDP Pilot
 
-## Overview
-РDP Pilot — это плагин для SSH Pilot, который добавляет поддержку протокола Remote Desktop Protocol (RDP) с использованием библиотеки FreeRDP.
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 
-## Особенности
-- Подключение к удаленным RD-серверам через FreeRDP
-- Интеграция с SSH Pilot в виде отдельного протокола
-- Безопасное хранение паролей через системную связку ключей
-- Автоматический выбор клиента FreeRDP (wlfreerdp для Wayland, xfreerdp для X11)
-- Поддержка Flatpak-окружения
-- Полноэкранный режим и пользовательское разрешение экрана
+RDP Pilot is a plugin for [SSH Pilot](https://github.com/mfat/sshpilot) that adds Remote Desktop Protocol (RDP) support via FreeRDP.
 
-## Требования
-- FreeRDP установлен на системе (доступны команды `wlfreerdp` или `xfreerdp`)
-- Связка ключей (libsecret или эквивалент) для безопасного хранения паролей
+## Features
 
-## Установка
-1. Скопируйте плагин RDP Pilot в каталог плагинов пользователя:
-   - Для Flatpak: `~/.var/app/io.github.mfat.sshpilot/data/sshpilot/plugins/rdp/`
-   - Для операционной системы: `~/.local/share/sshpilot/plugins/rdp/`
+- Full RDP protocol support via FreeRDP (xfreerdp / wlfreerdp)
+- Declarative connection form (host, port, credentials, display, performance, redirection, security, gateway, keyboard, codecs)
+- Portable password storage in connection config (optional system keyring fallback)
+- Automatic FreeRDP binary detection (wlfreerdp → xfreerdp, with `3`-suffixed versions)
+- Flatpak-aware execution (`flatpak-spawn --host`)
+- Dynamic window resize (`/dynamic-resolution`) enabled by default
+- All major FreeRDP switches exposed via grouped UI fields
 
-2. Запустите SSH Pilot и откройте **Настройки > Плагины**
+## Requirements
 
-3. Включите плагин RDP и перезапустите SSH Pilot
+- SSH Pilot (latest)
+- FreeRDP 2 or 3 installed (`xfreerdp3`, `wlfreerdp3`, `xfreerdp`, or `wlfreerdp`)
+  - Debian/Ubuntu: `apt install freerdp3-x11` (or `freerdp2-x11`)
+  - Fedora: `dnf install freerdp` (or `freerdp3`)
+  - Arch: `pacman -S freerdp` (or `freerdp3`)
+  - macOS: `brew install freerdp`
 
-## Использование
-После включения плагина RDP в выпадающем списке выбора протоколов (вместе с SSH) появится новая опция:
+## Installation
 
-- **Название протокола:** RDP (FreeRDP)
-
-При создании нового подключения появятся специальные поля:
-- IP / HOSTNAME - Адрес RDP-сервера
-- USERNAME - Имя пользователя для аутентификации
-- PORT (Default 3389) - Порт RDP (по умолчанию 3389)
-- RESOLUTION - Разрешение экрана (формат: 1920x1080 или 'f' для полноэкранного режима)
-
-Пароли будут автоматически сохраняться в связке ключей по уникальному ключу, основанному на нике подключения для безопасности.
-
-## Технические детали
-### Архитектура интеграции (ProtocolBackend)
-Плагин использует механизм расширения протоколов SDK (ProtocolBackend) из SSH Pilot для регистрации нового протокола RDP:
-- **Поля подключения**: Определяет параметры конфигурации RDP (хост, порт, имя пользователя, разрешение, дополнительные ключи FreeRDP)
-- **Безопасное хранение паролей (ctx.secrets)**: Пароли и конфиденциальные данные не хранятся в открытом виде в конфигурационных файлах. Плагин сохраняет и извлекает их через системную связку ключей (keyring) с помощью ctx.secrets.get()
-- **Запуск процесса (build_spawn)**: Метод возвращает SpawnSpec с массивом аргументов запуска бинарного файла FreeRDP (например, wlfreerdp или xfreerdp)
-
-### Отображение и интерактивность во вкладке (Ограничения GTK4)
-Существуют важные технические нюансы, связанные с отображением графического интерфейса RDP внутри вкладки приложения:
-- **Терминальный контекст вкладок**: Стандартные вкладки подключений в SSH Pilot ориентированы на текстовые терминалы (используют виджет эмулятора терминала Vte.Terminal). Графический вывод FreeRDP (X11/Wayland-клиент) по умолчанию не может транслироваться внутрь стандартного текстового терминала.
-- **Ограничения GTK4 и Wayland (Embedding)**: SSH Pilot построен на базе GTK4. В GTK4 виджеты Gtk.Socket и Gtk.Plug были полностью удалены, так как современный дисплейный сервер Wayland из соображений безопасности не поддерживает прямое встраивание графических контекстов сторонних процессов (XEMBED).
-- **Реальное поведение и управление жизненным циклом**: При запуске RDP через ProtocolBackend SSH Pilot запустит нативный процесс wlfreerdp / xfreerdp. Сессия откроется в отдельном нативном графическом окне:
-  - Обеспечивает максимальную производительность (прямое аппаратное ускорение графики, минимальный инпут-лаг)
-  - FreeRDP сможет корректно захватывать клавиатурный фокус и системные сочетания клавиш (например, Alt+Tab, Win), что часто ломается при глубоком встраивании окон
-  - Связь с интерфейсом сохраняется: SSH Pilot полностью контролирует процесс. Двойной клик на подключении в боковой панели запускает сессию, а закрытие графического окна FreeRDP корректно завершает сессию и очищает состояние внутри вкладки SSH Pilot
-
-## Пример плагина
-```python
-class FreeRdpBackend(ProtocolBackend):
-    protocol_id = "rdp"
-    display_name = "RDP (FreeRDP)"
-    
-    def connection_fields(self):
-        return [
-            FieldSpec(key="host", label="IP / HOSTNAME", required=True),
-            FieldSpec(key="username", label="USERNAME", required=True),
-            FieldSpec(key="port", label="PORT (Default 3389)", required=False),
-            FieldSpec(key="resolution", label="RESOLUTION (e.g. 1920x1080 or f for fullscreen)", required=False)
-        ]
-        
-    def build_spawn(self, connection, ctx):
-        data = connection.data or {}
-        host = data.get("host")
-        username = data.get("username")
-        port = data.get("port") or "3389"
-        resolution = data.get("resolution") or "1280x720"
-        
-        secret_key = f"rdp_password_{connection.nickname}"
-        password = ctx.secrets.get(secret_key)
-        
-        rdp_bin = "wlfreerdp" if os.environ.get("WAYLAND_DISPLAY") else "xfreerdp"
-        
-        argv = [
-            rdp_bin,
-            f"/v:{host}:{port}",
-            f"/u:{username}",
-            "/dynamic-resolution",
-            "/cert:tofu"
-        ]
-        
-        if password:
-            argv.append(f"/p:{password}")
-        
-        if resolution.lower() == "f":
-            argv.append("/f")
-        else:
-            argv.append(f"/size:{resolution}")
-            
-        if os.path.exists("/.flatpak-info"):
-            argv = ["flatpak-spawn", "--host"] + argv
-            
-        return SpawnSpec(argv=argv, env=dict(os.environ))
+```bash
+# Copy the plugin to SSH Pilot's user plugin directory
+cp -r rdp-pilot ~/.local/share/sshpilot/plugins/rdp/
 ```
 
-## Литература
-1. [sshPilot Plugin SDK](https://github.com/mfat/sshpilot/blob/main/PLUGIN_SDK.md)
-2. [Протокол FreeRDP](https://github.com/FreeRDP/FreeRDP)
-3. [Спецификация встраивания протоколов SSH Pilot](https://github.com/mfat/sshpilot/blob/main/PLUGIN_SDK.md#protocolbackends)
+For Flatpak installations:
 
-## Лицензия
-Этот плагин распространяется по лицензии MIT.
+```bash
+cp -r rdp-pilot ~/.var/app/io.github.mfat.sshpilot/data/sshpilot/plugins/rdp/
+```
 
+Then open SSH Pilot → **Settings → Plugins**, enable **RDP** and restart the app.
+
+## Usage
+
+1. Create a new connection or edit an existing one
+2. Select **RDP (FreeRDP)** from the protocol dropdown
+3. Fill in the required fields:
+   - **IP / HOSTNAME** — RDP server address
+   - **Username** — login username
+   - **Password** — login password (stored in connection config for portability)
+4. Adjust optional sections as needed (Display, Performance, Redirection, etc.)
+
+The RDP session opens in a native FreeRDP window, not inside the SSH Pilot terminal tab.
+
+## Connection Fields
+
+| Group        | Fields |
+|--------------|--------|
+| **Main**     | Host, Port, Username, Password, Domain |
+| **Display**  | Resolution, Color depth, Work area, Multi-monitor |
+| **Performance** | Smooth fonts, Aero, Window drag, Menu animations, Themes, Wallpaper, GDI |
+| **Redirection** | Clipboard, Drives, Home dir, Printers, Smartcards, Serial, Audio |
+| **Security** | Protocol security, Certificate ignore, Certificate name |
+| **Gateway**  | Gateway hostname, Gateway username, Gateway domain |
+| **Keyboard** | Layout, Type |
+| **Network**  | Connection type, Compression |
+| **Codecs**   | RemoteFX, NSCodec, JPEG, JPEG quality |
+
+## Password Storage
+
+Passwords are stored in `connection.data` under the `credential` key and serialized into SSH Pilot's JSON config. This makes them portable when copying the config between machines.
+
+For backward compatibility, passwords previously saved via the system keyring (`ctx.secrets`) are still supported as a fallback.
+
+## Technical Details
+
+### ProtocolBackend Integration
+
+The plugin implements the `ProtocolBackend` SDK interface:
+
+- **`connection_fields()`** — declares all RDP-specific fields with types, defaults, and grouping
+- **`build_spawn()`** — resolves the FreeRDP binary, assembles the full argv from connection data
+- **`validate()`** — validates host and port before saving
+- **`capabilities()`** — returns empty frozenset (RDP is not an SSH protocol)
+
+### Flatpak Support
+
+When running inside Flatpak, the plugin detects `/.flatpak-info` and prefixes FreeRDP invocations with `flatpak-spawn --host` to access the host system's FreeRDP installation.
+
+### Window Behavior
+
+RDP sessions open in a separate native window (not embedded in the SSH Pilot tab). This provides:
+- Full GPU acceleration and minimal input lag
+- Correct keyboard focus and system shortcut handling
+- Clean lifecycle management (closing the FreeRDP window terminates the session)
+
+## Resources
+
+- [SSH Pilot Plugin SDK](https://github.com/mfat/sshpilot/blob/main/PLUGIN_SDK.md)
+- [FreeRDP](https://github.com/FreeRDP/FreeRDP)
+- [FreeRDP User Manual](https://github.com/awakecoding/FreeRDP-Manuals/blob/master/User/FreeRDP-User-Manual.markdown)
+
+## License
+
+MIT
