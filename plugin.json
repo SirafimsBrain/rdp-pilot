@@ -1,0 +1,8 @@
+{
+  "id": "rdp",
+  "name": "RDP (FreeRDP)",
+  "version": "0.1.0",
+  "homepage": "https://github.com/yourname/rdp-plugin",
+  "api_version": 1,
+  "permissions": ["keyring", "process"]
+}
