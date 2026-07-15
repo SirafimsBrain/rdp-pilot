@@ -97,5 +97,6 @@ __pycache__/
 requests/
 recomendation/
 graphify-out/
+.graphifyignore
 AGENTS.md
 
